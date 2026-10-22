@@ -49,7 +49,6 @@ export function RegisterPage() {
         .maybeSingle()
 
       if (existing) {
-        // Check if they have session
         const { data: existingSession } = await supabase
           .from('sessions')
           .select('*')
@@ -57,31 +56,27 @@ export function RegisterPage() {
           .maybeSingle()
         
         if (existingSession) {
+          // Allow resume if session is still running
           if (existingSession.session_status === 'active' || existingSession.session_status === 'paused') {
-            // Check if not expired
+            let canResume = true
             if (existingSession.deadline_at) {
-              const deadline = new Date(existingSession.deadline_at).getTime()
-              if (Date.now() < deadline) {
-                // Link identity if not exists
-                if (currentUser) {
-                  await supabase.from('participant_identities').upsert({
-                    participant_id: existing.id,
-                    auth_user_id: currentUser.id,
-                    is_active: true,
-                  }, { onConflict: 'participant_id,auth_user_id' })
-                }
-                navigate('/session')
-                return
+              if (new Date(existingSession.deadline_at).getTime() <= Date.now()) {
+                canResume = false
               }
-            } else {
-              if (currentUser) {
-                await supabase.from('participant_identities').upsert({
-                  participant_id: existing.id,
-                  auth_user_id: currentUser.id,
-                  is_active: true,
-                }, { onConflict: 'participant_id,auth_user_id' })
-              }
+            }
+            if (canResume && currentUser) {
+              // Link this auth user to the participant
+              await supabase.from('participant_identities').upsert({
+                participant_id: existing.id,
+                auth_user_id: currentUser.id,
+                is_active: true,
+              }, { onConflict: 'participant_id,auth_user_id' })
               navigate('/session')
+              return
+            }
+            if (!canResume) {
+              setError('This session has ended. Please contact the coordinator.')
+              setLoading(false)
               return
             }
           }
@@ -96,9 +91,41 @@ export function RegisterPage() {
             navigate('/session')
             return
           }
+          if (existingSession.session_status === 'pending_challenge') {
+            if (currentUser) {
+              await supabase.from('participant_identities').upsert({
+                participant_id: existing.id,
+                auth_user_id: currentUser.id,
+                is_active: true,
+              }, { onConflict: 'participant_id,auth_user_id' })
+            }
+            navigate('/challenges')
+            return
+          }
         }
         
-        setError('This register number is already registered with an ended/completed session. Please contact the coordinator for recovery.')
+        // If we get here, try to resume anyway if session exists and not completed/cancelled
+        if (existingSession && existingSession.session_status !== 'completed' && existingSession.session_status !== 'cancelled' && existingSession.session_status !== 'expired') {
+          if (currentUser) {
+            await supabase.from('participant_identities').upsert({
+              participant_id: existing.id,
+              auth_user_id: currentUser.id,
+              is_active: true,
+            }, { onConflict: 'participant_id,auth_user_id' })
+          }
+          if (existingSession.session_status === 'active' || existingSession.session_status === 'paused') {
+            navigate('/session')
+            return
+          }
+          if (existingSession.session_status === 'challenge_selected') {
+            navigate('/challenges')
+            return
+          }
+          navigate('/challenges')
+          return
+        }
+        
+        setError('This register number is already registered. Please contact the coordinator for recovery.')
         setLoading(false)
         return
       }
