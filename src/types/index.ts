@@ -228,10 +228,13 @@ export type ParticipantSurpriseTask = Pick<
 
 export interface ChallengeBrief {
   number: number
+  emoji: string
   title: string
-  brief: string
+  tagline: string
+  intro: string[]
+  build_heading: string
   core_requirements: string[]
-  possible_additions: string[]
+  example: string
 }
 
 export interface ParticipantWithSession extends Participant {

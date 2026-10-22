@@ -41,6 +41,8 @@ export function AdminDashboardPage() {
   const [query, setQuery] = useState('')
 
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
+  const [editingTask, setEditingTask] = useState<any>(null)
+  const [templates, setTemplates] = useState<Record<number, { title: string; instructions: string }>>({})
   const [taskTitle, setTaskTitle] = useState('')
   const [taskInstructions, setTaskInstructions] = useState('')
   const [showTaskForm, setShowTaskForm] = useState(false)
@@ -88,6 +90,18 @@ export function AdminDashboardPage() {
         .select('*, participants(full_name, register_number), sessions(id)')
         .order('created_at', { ascending: false })
       setSurpriseTasks(tasks || [])
+
+      // Coordinator-only defaults, one per challenge.
+      const { data: tpl } = await supabase
+        .from('challenge_surprise_templates')
+        .select('challenge_number, title, instructions')
+      if (tpl) {
+        setTemplates(
+          Object.fromEntries(
+            tpl.map((t) => [t.challenge_number, { title: t.title, instructions: t.instructions }]),
+          ),
+        )
+      }
     } catch (err) {
       console.error(err)
     } finally {
@@ -96,26 +110,58 @@ export function AdminDashboardPage() {
     }
   }
 
-  const createDraftTask = async () => {
-    if (!selectedParticipant || !taskTitle || !taskInstructions) return
+  const openTaskForm = (row: any) => {
+    const existing = row.session
+      ? surpriseTasks.find((t) => t.session_id === row.session.id && t.status !== 'withdrawn')
+      : null
+    const num = row.challenge?.challenge_number
+    const template = num ? templates[num] : undefined
+
+    setSelectedParticipant(row)
+    setEditingTask(existing || null)
+    setTaskTitle(existing?.title || template?.title || '')
+    setTaskInstructions(existing?.instructions || template?.instructions || '')
+    setShowTaskForm(true)
+  }
+
+  const closeTaskForm = () => {
+    setShowTaskForm(false)
+    setEditingTask(null)
+    setTaskTitle('')
+    setTaskInstructions('')
+    setSelectedParticipant(null)
+  }
+
+  const saveDraftTask = async () => {
+    if (!selectedParticipant || !taskTitle.trim() || !taskInstructions.trim()) return
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: sess } = await supabase.from('sessions').select('id').eq('participant_id', selectedParticipant.participant.id).single()
-      if (!sess) return
 
-      await supabase.from('surprise_tasks').insert({
-        session_id: sess.id,
-        participant_id: selectedParticipant.participant.id,
-        title: taskTitle,
-        instructions: taskInstructions,
-        status: 'draft',
-        created_by_admin_id: user?.id,
-      })
+      if (editingTask) {
+        if (editingTask.status !== 'draft') return
+        await supabase
+          .from('surprise_tasks')
+          .update({ title: taskTitle.trim(), instructions: taskInstructions.trim() })
+          .eq('id', editingTask.id)
+      } else {
+        const { data: sess } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('participant_id', selectedParticipant.participant.id)
+          .single()
+        if (!sess) return
 
-      setShowTaskForm(false)
-      setTaskTitle('')
-      setTaskInstructions('')
-      setSelectedParticipant(null)
+        await supabase.from('surprise_tasks').insert({
+          session_id: sess.id,
+          participant_id: selectedParticipant.participant.id,
+          title: taskTitle.trim(),
+          instructions: taskInstructions.trim(),
+          status: 'draft',
+          created_by_admin_id: user?.id,
+        })
+      }
+
+      closeTaskForm()
       loadData()
     } catch (err) {
       console.error(err)
@@ -328,6 +374,10 @@ export function AdminDashboardPage() {
                     ) : (
                       filtered.map((p) => {
                         const brief = p.challenge ? CHALLENGES.find((c) => c.number === p.challenge.challenge_number) : null
+                        const existingTask = p.session
+                          ? surpriseTasks.find((t) => t.session_id === p.session.id && t.status !== 'withdrawn')
+                          : null
+                        const taskLocked = !!existingTask && existingTask.status !== 'draft'
                         return (
                           <tr key={p.participant.id} className="border-b border-vf-border/60 transition-colors last:border-0 hover:bg-vf-surface-2/40">
                             <td className="px-5 py-3.5">
@@ -375,11 +425,18 @@ export function AdminDashboardPage() {
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  onClick={() => { setSelectedParticipant(p); setShowTaskForm(true) }}
-                                  disabled={!p.session}
+                                  onClick={() => openTaskForm(p)}
+                                  disabled={!p.session || !p.challenge || taskLocked}
+                                  title={
+                                    taskLocked
+                                      ? 'A surprise task has already been sent'
+                                      : existingTask
+                                        ? 'Edit the draft surprise task'
+                                        : 'Add the default surprise task for this challenge'
+                                  }
                                 >
                                   <Plus className="h-3 w-3" />
-                                  Surprise
+                                  {taskLocked ? 'Task sent' : existingTask ? 'Edit draft' : 'Surprise'}
                                 </Button>
                               </div>
                             </td>
@@ -473,19 +530,35 @@ export function AdminDashboardPage() {
       {showTaskForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-vf-border bg-vf-surface p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-vf-text">New surprise task</h2>
-            <p className="mt-1 text-sm text-vf-text-muted">
-              For {selectedParticipant?.participant.full_name} — saved as a draft until you publish it.
-            </p>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-vf-text">
+                  {editingTask ? 'Edit surprise task' : 'New surprise task'}
+                </h2>
+                <p className="mt-1 text-sm text-vf-text-muted">
+                  For {selectedParticipant?.participant.full_name} — saved as a draft until you publish it.
+                </p>
+              </div>
+              <StatusBadge status="draft" />
+            </div>
+
+            {!editingTask && selectedParticipant?.challenge && (
+              <p className="mt-4 flex items-start gap-2 rounded-lg border border-vf-violet/25 bg-vf-violet/[0.07] px-3 py-2.5 text-xs leading-relaxed text-vf-violet-light">
+                <Sparkles className="mt-px h-3.5 w-3.5 shrink-0" />
+                Pre-filled with the default task for Challenge{' '}
+                {selectedParticipant.challenge.challenge_number}. Edit anything before saving.
+              </p>
+            )}
+
             <div className="mt-5 space-y-4">
               <Input label="Task title" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g. Bonus challenge" />
               <Textarea label="Instructions" value={taskInstructions} onChange={(e) => setTaskInstructions(e.target.value)} placeholder="What must the participant do?" rows={6} />
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => { setShowTaskForm(false); setTaskTitle(''); setTaskInstructions('') }}>
+                <Button variant="secondary" onClick={closeTaskForm}>
                   Cancel
                 </Button>
-                <Button onClick={createDraftTask} disabled={!taskTitle || !taskInstructions}>
-                  Save draft
+                <Button onClick={saveDraftTask} disabled={!taskTitle.trim() || !taskInstructions.trim()}>
+                  {editingTask ? 'Update draft' : 'Save draft'}
                 </Button>
               </div>
             </div>

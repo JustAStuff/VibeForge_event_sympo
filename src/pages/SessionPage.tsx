@@ -247,10 +247,19 @@ export function SessionPage() {
             <div className="space-y-6 p-6">
               {brief ? (
                 <>
-                  <p className="text-sm leading-relaxed text-vf-text-2">{brief.brief}</p>
+                  <p className={`text-sm font-semibold italic leading-relaxed ${accent.text}`}>
+                    {brief.emoji} {brief.tagline}
+                  </p>
+                  <div className="space-y-3">
+                    {brief.intro.map((para) => (
+                      <p key={para.slice(0, 32)} className="text-sm leading-relaxed text-vf-text-2">
+                        {para}
+                      </p>
+                    ))}
+                  </div>
                   <div>
                     <h3 className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-vf-cyan">
-                      Core requirements
+                      {brief.build_heading}
                     </h3>
                     <ul className="space-y-2.5">
                       {brief.core_requirements.map((req) => (
@@ -261,6 +270,15 @@ export function SessionPage() {
                       ))}
                     </ul>
                   </div>
+                  <div className="rounded-xl border border-vf-border bg-vf-bg/50 p-4">
+                    <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-vf-text-muted">
+                      How it might work
+                    </h3>
+                    <p className="text-sm leading-relaxed text-vf-text-2">{brief.example}</p>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-vf-text-muted">
+                    A surprise task is official only when it appears in the panel on the right.
+                  </p>
                 </>
               ) : (
                 <p className="text-sm text-vf-text-muted">Loading challenge details…</p>

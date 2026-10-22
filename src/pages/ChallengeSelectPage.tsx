@@ -6,51 +6,9 @@ import { Button } from '@/components/ui/Button'
 import { Alert, ConfirmDialog } from '@/components/ui/Dialog'
 import { Page, BrandMark } from '@/components/shared/Page'
 import { ChallengeIcon, challengeAccent } from '@/components/shared/ChallengeIcon'
+import { SessionInstructions } from '@/components/shared/SessionInstructions'
 import { CHALLENGES } from '@/data/challenges'
-import {
-  Check,
-  Clock,
-  Lock,
-  Sparkles,
-  MousePointerClick,
-  Bell,
-  Flag,
-  AlertTriangle,
-  ShieldCheck,
-} from 'lucide-react'
-
-const RULES = [
-  {
-    icon: Clock,
-    title: '45 minutes, server-timed',
-    body: 'The clock starts the moment you press start. Refreshing or closing the tab will not pause or reset it.',
-  },
-  {
-    icon: MousePointerClick,
-    title: 'One challenge, no switching',
-    body: 'You choose once. The full brief unlocks only after you start — there are no previews and no take-backs.',
-  },
-  {
-    icon: Sparkles,
-    title: 'Build with AI, own your work',
-    body: 'Any AI tool is allowed, but you must be able to explain and demo what you built to the coordinator.',
-  },
-  {
-    icon: AlertTriangle,
-    title: 'Surprise task may drop',
-    body: 'A confidential task can appear at any time. Keep this tab open — it shows up instantly when published.',
-  },
-  {
-    icon: Bell,
-    title: 'Checkpoint alerts',
-    body: 'Browser notifications fire at 15, 30 and 45 minutes. Allow notifications when your browser asks.',
-  },
-  {
-    icon: Flag,
-    title: 'Time up means stop',
-    body: 'Your session closes automatically at zero. Present your work to the coordinator — no restarts or extensions.',
-  },
-]
+import { Check, Clock, Lock, Sparkles } from 'lucide-react'
 
 export function ChallengeSelectPage() {
   const navigate = useNavigate()
@@ -146,46 +104,7 @@ export function ChallengeSelectPage() {
 
         {error && <Alert type="error" className="mt-6 max-w-2xl">{error}</Alert>}
 
-        {/* Instructions — deliberately above the list */}
-        <section
-          aria-labelledby="instructions-heading"
-          className="relative mt-6 overflow-hidden rounded-2xl border border-vf-violet/25 bg-vf-surface/60 backdrop-blur"
-        >
-          <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-vf-violet/15 blur-3xl" />
-          <div className="relative flex flex-col gap-2 border-b border-vf-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <h2 id="instructions-heading" className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-vf-text">
-              <ShieldCheck className="h-4 w-4 text-vf-violet-light" />
-              Session rules
-            </h2>
-            <span className="text-[11px] font-medium text-vf-text-muted">
-              Read all six before choosing a challenge
-            </span>
-          </div>
-
-          <div className="relative grid gap-x-8 gap-y-5 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3">
-            {RULES.map(({ icon: Icon, title, body }, i) => (
-              <div key={title} className="flex gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-vf-border bg-vf-bg/60 text-vf-cyan">
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-[13px] font-semibold leading-snug text-vf-text">
-                    <span className="mr-1.5 font-mono text-[11px] text-vf-text-muted">{String(i + 1).padStart(2, '0')}</span>
-                    {title}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-vf-text-muted">{body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="relative border-t border-vf-border bg-vf-orange/[0.06] px-5 py-3 sm:px-6">
-            <p className="flex items-start gap-2 text-xs leading-relaxed text-vf-orange">
-              <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
-              No restarts. No extensions. Choose carefully — the decision is final.
-            </p>
-          </div>
-        </section>
+        <SessionInstructions />
 
         {/* Acknowledgement gate */}
         <label
