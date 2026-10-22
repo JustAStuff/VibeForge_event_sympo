@@ -28,9 +28,16 @@ export function RegisterPage() {
     setLoading(true)
 
     try {
-      if (!user) {
+      let currentUser = user
+      if (!currentUser) {
         const { error: authErr } = await signInAnonymously()
         if (authErr) throw authErr
+        const { data: { user: u2 } } = await supabase.auth.getUser()
+        currentUser = u2
+      }
+      if (!currentUser) {
+        const { data: { user: u } } = await supabase.auth.getUser()
+        currentUser = u
       }
 
       const normalized = normalizeRegisterNumber(form.register_number)
@@ -42,7 +49,35 @@ export function RegisterPage() {
         .maybeSingle()
 
       if (existing) {
-        setError('This register number is already registered. If you need to recover access to your existing session, please contact the coordinator.')
+        // Check if they have identity
+        const { data: identity } = await supabase
+          .from('participant_identities')
+          .select('id')
+          .eq('participant_id', existing.id)
+          .eq('auth_user_id', currentUser?.id)
+          .maybeSingle()
+        
+        if (identity) {
+          // Has session?
+          const { data: existingSession } = await supabase
+            .from('sessions')
+            .select('session_status')
+            .eq('participant_id', existing.id)
+            .in('session_status', ['active', 'paused', 'challenge_selected'])
+            .maybeSingle()
+          if (existingSession?.session_status === 'active' || existingSession?.session_status === 'paused') {
+            navigate('/session')
+            return
+          }
+          if (existingSession?.session_status === 'challenge_selected') {
+            navigate('/session')
+            return
+          }
+          navigate('/challenges')
+          return
+        }
+        
+        setError('This register number is already registered with a different session/browser. Please use the same browser or contact the coordinator for recovery.')
         setLoading(false)
         return
       }
@@ -60,7 +95,6 @@ export function RegisterPage() {
 
       if (pErr) throw pErr
 
-      const currentUser = user || (await supabase.auth.getUser()).data.user
       if (currentUser) {
         await supabase.from('participant_identities').insert({
           participant_id: participant.id,
@@ -75,24 +109,8 @@ export function RegisterPage() {
           participant_id: participant.id,
           session_status: 'pending_challenge',
         })
-        .select()
-        .single()
 
-      // Check if they already have an active session
-      const { data: existingSession } = await supabase
-        .from('sessions')
-        .select('session_status')
-        .eq('participant_id', participant.id)
-        .in('session_status', ['active', 'paused', 'challenge_selected'])
-        .maybeSingle()
-      
-      if (existingSession?.session_status === 'active' || existingSession?.session_status === 'paused') {
-        navigate('/session')
-      } else if (existingSession?.session_status === 'challenge_selected') {
-        navigate('/session')
-      } else {
-        navigate('/challenges')
-      }
+      navigate('/challenges')
     } catch (err) {
       setError((err as Error).message)
     } finally {
