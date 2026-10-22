@@ -38,8 +38,8 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route path="/challenges" element={<ProtectedRoute><ChallengeSelectPage /></ProtectedRoute>} />
-        <Route path="/session" element={<ProtectedRoute><SessionPage /></ProtectedRoute>} />
+        <Route path="/challenges" element={<ChallengeSelectPage />} />
+        <Route path="/session" element={<SessionPage />} />
         <Route path="/recovery/awaiting" element={<RecoveryAwaitingPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
