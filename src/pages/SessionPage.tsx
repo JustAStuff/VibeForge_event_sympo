@@ -30,6 +30,13 @@ export function SessionPage() {
     if (user) loadParticipantData(user.id)
   }, [user, loadParticipantData])
 
+  // Keep in sync with coordinator actions (pause, resume, deadline shifts).
+  useEffect(() => {
+    if (!user) return
+    const interval = setInterval(() => loadParticipantData(user.id), 15000)
+    return () => clearInterval(interval)
+  }, [user, loadParticipantData])
+
   useEffect(() => {
     const interval = setInterval(tickTimer, 1000)
     return () => clearInterval(interval)

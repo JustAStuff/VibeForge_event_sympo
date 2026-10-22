@@ -43,7 +43,10 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
   setParticipant: (participant) => set({ participant }),
   setSession: (session) => {
     const remaining = session?.deadline_at
-      ? calcRemainingSeconds(session.deadline_at)
+      ? session.session_status === 'paused' && session.paused_at
+        ? calcRemainingSeconds(session.deadline_at) +
+          Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
+        : calcRemainingSeconds(session.deadline_at)
       : 0
     set({ session, remainingSeconds: remaining })
   },
@@ -93,7 +96,12 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
 
       set({
         session,
-        remainingSeconds: session.deadline_at ? calcRemainingSeconds(session.deadline_at) : 0,
+        remainingSeconds: session.deadline_at
+          ? session.session_status === 'paused' && session.paused_at
+            ? calcRemainingSeconds(session.deadline_at) +
+              Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
+            : calcRemainingSeconds(session.deadline_at)
+          : 0,
       })
 
       // Load challenge

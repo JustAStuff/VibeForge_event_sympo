@@ -21,6 +21,8 @@ import {
   Trophy,
   Sparkles,
   RefreshCw,
+  Pause,
+  Play,
 } from 'lucide-react'
 import { formatMMSS } from '@/lib/utils'
 import { CHALLENGES } from '@/data/challenges'
@@ -133,6 +135,16 @@ export function AdminDashboardPage() {
     } catch (err) {
       console.error(err)
     }
+  }
+
+  const togglePause = async (row: any) => {
+    if (!row.session) return
+    const isPaused = row.session.session_status === 'paused'
+    const { error } = await supabase.rpc(isPaused ? 'resume_session' : 'pause_session', {
+      p_session_id: row.session.id,
+    })
+    if (error) console.error(error)
+    loadData()
   }
 
   const reviewRecovery = async (req: any, action: 'approve' | 'reject') => {
@@ -345,16 +357,31 @@ export function AdminDashboardPage() {
                                 <span className="text-sm text-vf-text-muted">—</span>
                               )}
                             </td>
-                            <td className="px-5 py-3.5 text-right">
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => { setSelectedParticipant(p); setShowTaskForm(true) }}
-                                disabled={!p.session}
-                              >
-                                <Plus className="h-3 w-3" />
-                                Surprise
-                              </Button>
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center justify-end gap-2">
+                                {p.session && (p.session.session_status === 'active' || p.session.session_status === 'paused') && (
+                                  <Button
+                                    size="sm"
+                                    variant={p.session.session_status === 'paused' ? 'success' : 'secondary'}
+                                    onClick={() => togglePause(p)}
+                                    title={p.session.session_status === 'paused' ? 'Resume session' : 'Pause session'}
+                                  >
+                                    {p.session.session_status === 'paused'
+                                      ? <Play className="h-3 w-3" />
+                                      : <Pause className="h-3 w-3" />}
+                                    {p.session.session_status === 'paused' ? 'Resume' : 'Pause'}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => { setSelectedParticipant(p); setShowTaskForm(true) }}
+                                  disabled={!p.session}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                  Surprise
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         )
