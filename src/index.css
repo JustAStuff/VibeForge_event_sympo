@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-vf-bg text-vf-text font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-vf-surface;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-vf-border-2 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-vf-violet;
+  }
+}
+
+@layer components {
+  .vf-card {
+    @apply bg-vf-surface border border-vf-border rounded-xl p-6;
+  }
+
+  .vf-card-hover {
+    @apply vf-card transition-all duration-200 hover:border-vf-violet hover:shadow-vf cursor-pointer;
+  }
+
+  .vf-gradient-text {
+    @apply bg-gradient-to-r from-vf-violet via-vf-cyan to-vf-orange bg-clip-text text-transparent;
+  }
+
+  .vf-gradient-border {
+    background: linear-gradient(135deg, #7c3aed, #06b6d4, #f97316);
+    padding: 1px;
+    border-radius: 12px;
+  }
+
+  .vf-glow-violet {
+    box-shadow: 0 0 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .vf-glow-cyan {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+  }
+
+  .vf-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .vf-input {
+    @apply w-full bg-vf-surface-2 border border-vf-border rounded-lg px-4 py-3 text-vf-text
+           placeholder:text-vf-text-muted
+           focus:outline-none focus:border-vf-violet focus:ring-1 focus:ring-vf-violet
+           transition-colors duration-200;
+  }
+
+  .vf-select {
+    @apply vf-input appearance-none cursor-pointer;
+  }
+
+  .vf-textarea {
+    @apply vf-input resize-none;
+  }
+
+  .vf-label {
+    @apply block text-sm font-medium text-vf-text-2 mb-1.5;
+  }
+
+  .timer-display {
+    font-family: 'JetBrains Mono', monospace;
+    @apply text-6xl font-bold tabular-nums;
+    text-shadow: 0 0 30px currentColor;
+  }
+}
+
+@layer utilities {
+  .text-gradient-violet {
+    @apply bg-gradient-to-r from-vf-violet to-vf-violet-light bg-clip-text text-transparent;
+  }
+
+  .text-gradient-cyan {
+    @apply bg-gradient-to-r from-vf-cyan to-vf-cyan-light bg-clip-text text-transparent;
+  }
+
+  .text-gradient-full {
+    @apply bg-gradient-to-r from-vf-violet via-vf-cyan to-vf-orange bg-clip-text text-transparent;
+  }
+
+  .animate-count {
+    animation: count 0.1s ease-in-out;
+  }
+}
