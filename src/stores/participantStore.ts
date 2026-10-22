@@ -1,13 +1,19 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
-import type { Participant, Session, Challenge, SurpriseTask, RecoveryRequest } from '@/types'
+import type {
+  Participant,
+  Session,
+  Challenge,
+  ParticipantSurpriseTask,
+  RecoveryRequest,
+} from '@/types'
 import { calcRemainingSeconds } from '@/lib/utils'
 
 interface ParticipantState {
   participant: Participant | null
   session: Session | null
   challenge: Challenge | null
-  surpriseTask: SurpriseTask | null
+  surpriseTask: ParticipantSurpriseTask | null
   pendingRecovery: RecoveryRequest | null
   remainingSeconds: number
   loading: boolean
@@ -16,7 +22,7 @@ interface ParticipantState {
   setParticipant: (p: Participant | null) => void
   setSession: (s: Session | null) => void
   setChallenge: (c: Challenge | null) => void
-  setSurpriseTask: (t: SurpriseTask | null) => void
+  setSurpriseTask: (t: ParticipantSurpriseTask | null) => void
   setPendingRecovery: (r: RecoveryRequest | null) => void
 
   loadParticipantData: (authUserId: string) => Promise<void>
@@ -100,7 +106,10 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
         set({ challenge: challenge || null })
       }
 
-      // Load ONLY published surprise task (CRITICAL: no draft access)
+      // Load ONLY published surprise task (CRITICAL: no draft access).
+      // The status filter is defence-in-depth only — the authoritative guard is
+      // the RLS policy on surprise_tasks, which makes draft rows unreadable to
+      // participants at the database level.
       const { data: task } = await supabase
         .from('surprise_tasks')
         .select('id, session_id, participant_id, title, instructions, status, published_at, acknowledged_at, completed_at, created_at, updated_at')

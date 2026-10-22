@@ -207,6 +207,33 @@ export interface PushSubscription {
 // Extended / Joined Types for UI
 // ============================================================
 
+/**
+ * Narrow view of a surprise task that is safe to expose to a participant.
+ * Deliberately omits admin identity columns and any draft-only fields.
+ */
+export type ParticipantSurpriseTask = Pick<
+  SurpriseTask,
+  | 'id'
+  | 'session_id'
+  | 'participant_id'
+  | 'title'
+  | 'instructions'
+  | 'status'
+  | 'published_at'
+  | 'acknowledged_at'
+  | 'completed_at'
+  | 'created_at'
+  | 'updated_at'
+>
+
+export interface ChallengeBrief {
+  number: number
+  title: string
+  brief: string
+  core_requirements: string[]
+  possible_additions: string[]
+}
+
 export interface ParticipantWithSession extends Participant {
   session: Session | null
   challenge: Challenge | null

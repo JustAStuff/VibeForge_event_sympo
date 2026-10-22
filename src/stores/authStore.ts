@@ -16,19 +16,23 @@ interface AuthState {
   initialize: () => Promise<void>
 }
 
-// Admin check by querying the participants check — admin emails stored in Supabase metadata
+/**
+ * Admin check.
+ *
+ * SECURITY: only `app_metadata` is trusted. `user_metadata` is writable by the
+ * authenticated user themselves (supabase.auth.updateUser({ data: { ... } })),
+ * so checking `user_metadata.role` would let any participant self-promote.
+ *
+ * This client-side flag is for UI affordances ONLY. The authoritative check is
+ * the `is_admin()` SQL helper used by every RLS policy and Edge Function.
+ */
 function checkIsAdmin(user: User | null): boolean {
   if (!user) return false
-  const meta = user.user_metadata || {}
   const appMeta = user.app_metadata || {}
-  return (
-    meta.role === 'admin' ||
-    appMeta.role === 'admin' ||
-    appMeta.claims_admin === true
-  )
+  return appMeta.role === 'admin' || appMeta.claims_admin === true
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   session: null,
   isAdmin: false,

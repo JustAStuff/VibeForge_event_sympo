@@ -1,0 +1,17 @@
+{
+  "name": "VibeForge",
+  "short_name": "VibeForge",
+  "description": "A 45-minute AI-assisted development challenge. Register, pick one of six challenges, and ship a working prototype.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    {
+      "src": "/vf-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
