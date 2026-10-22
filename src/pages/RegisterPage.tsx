@@ -78,7 +78,21 @@ export function RegisterPage() {
         .select()
         .single()
 
-      navigate('/challenges')
+      // Check if they already have an active session
+      const { data: existingSession } = await supabase
+        .from('sessions')
+        .select('session_status')
+        .eq('participant_id', participant.id)
+        .in('session_status', ['active', 'paused', 'challenge_selected'])
+        .maybeSingle()
+      
+      if (existingSession?.session_status === 'active' || existingSession?.session_status === 'paused') {
+        navigate('/session')
+      } else if (existingSession?.session_status === 'challenge_selected') {
+        navigate('/session')
+      } else {
+        navigate('/challenges')
+      }
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -105,10 +119,8 @@ export function RegisterPage() {
               
               <Input label="Full Name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required placeholder="Enter your full name" />
               <Select label="Academic Year" value={form.academic_year} onChange={(e) => setForm({ ...form, academic_year: e.target.value as AcademicYear })} required options={[
-                { value: 'First Year', label: 'First Year' },
                 { value: 'Second Year', label: 'Second Year' },
                 { value: 'Third Year', label: 'Third Year' },
-                { value: 'Fourth Year', label: 'Fourth Year' },
               ]} placeholder="Select year" />
               <Input label="Register Number" value={form.register_number} onChange={(e) => setForm({ ...form, register_number: e.target.value })} required placeholder="Enter your register number" hint="Leading zeros will be preserved" />
 

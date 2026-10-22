@@ -73,7 +73,7 @@ export function SessionPage() {
 
   if (!participant || !session) return <LoadingPage message="Loading your session..." />
 
-  const isTimeUp = remainingSeconds <= 0 && session.session_status === 'active'
+  const isTimeUp = remainingSeconds <= 0 && (session.session_status === 'active' || session.session_status === 'paused')
   const isPaused = session.session_status === 'paused'
 
   return (
@@ -96,7 +96,9 @@ export function SessionPage() {
             <div className={`timer-display ${remainingSeconds <= 300 ? 'text-vf-orange' : remainingSeconds <= 600 ? 'text-vf-warning' : 'text-vf-violet'}`}>
               {formatMMSS(remainingSeconds)}
             </div>
-            {isTimeUp && <p className="mt-4 text-vf-error font-semibold">Your 45-minute session has ended. Please present your work to the coordinator.</p>}
+            {(isTimeUp || session.session_status === 'completed' || session.session_status === 'expired') && (
+              <p className="mt-4 text-vf-error font-semibold">Your session has ended. Please present your work to the coordinator.</p>
+            )}
           </CardBody>
         </Card>
 

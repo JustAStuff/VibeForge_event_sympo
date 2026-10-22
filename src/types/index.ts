@@ -1,7 +1,7 @@
 // Supabase Database Types
 // Auto-generated from schema — update when migrations change
 
-export type AcademicYear = 'First Year' | 'Second Year' | 'Third Year' | 'Fourth Year'
+export type AcademicYear = 'Second Year' | 'Third Year'
 
 export type SessionStatus =
   | 'pending_challenge'

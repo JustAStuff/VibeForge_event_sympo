@@ -1,10 +1,40 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuthStore } from '@/stores/authStore'
+import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Zap, Clock, Trophy, Code2 } from 'lucide-react'
 
 export function HomePage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const [checking, setChecking] = useState(false)
+
+  useEffect(() => {
+    async function checkSession() {
+      if (!user) return
+      setChecking(true)
+      try {
+        const { data: identity } = await supabase
+          .from('participant_identities')
+          .select('participant_id')
+          .eq('auth_user_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle()
+        if (!identity) return
+        const { data: session } = await supabase
+          .from('sessions')
+          .select('session_status')
+          .eq('participant_id', identity.participant_id)
+          .in('session_status', ['active', 'paused', 'challenge_selected'])
+          .maybeSingle()
+        if (session) navigate('/session')
+      } catch {}
+      setChecking(false)
+    }
+    checkSession()
+  }, [user, navigate])
 
   return (
     <div className="min-h-screen bg-vf-bg">
@@ -42,7 +72,7 @@ export function HomePage() {
         </div>
 
         <div className="flex gap-4 justify-center">
-          <Button size="lg" onClick={() => navigate('/register')}>
+          <Button size="lg" onClick={() => navigate('/register')} disabled={checking}>
             <Zap className="w-5 h-5" />
             Register & Start
           </Button>

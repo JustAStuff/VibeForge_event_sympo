@@ -64,7 +64,6 @@ export function ChallengeSelectPage() {
   return (
     <div className="min-h-screen bg-vf-bg">
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <button onClick={() => navigate('/')} className="flex items-center gap-2 text-vf-text-muted hover:text-vf-text mb-6 transition-colors"><ArrowLeft className="w-4 h-4" />Back</button>
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Choose Your Challenge</h1>
           <p className="text-vf-text-muted">Select one of the six challenges. Full details will appear after you start the session.</p>
