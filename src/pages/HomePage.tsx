@@ -72,7 +72,7 @@ export function HomePage() {
         </div>
 
         <div className="flex gap-4 justify-center">
-          <Button size="lg" onClick={() => navigate('/register')} disabled={checking}>
+          <Button size="lg" onClick={() => navigate('/register')}>
             <Zap className="w-5 h-5" />
             Register & Start
           </Button>
