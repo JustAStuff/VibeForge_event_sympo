@@ -29,6 +29,19 @@ export function SessionPage() {
     return () => clearInterval(interval)
   }, [tickTimer])
 
+  // Auto-complete the session when the server-authoritative deadline passes.
+  useEffect(() => {
+    if (remainingSeconds > 0) return
+    if (!session || session.session_status !== 'active') return
+    let cancelled = false
+    ;(async () => {
+      const { error } = await supabase.rpc('finalize_expired_sessions')
+      if (cancelled) return
+      if (!error && user) loadParticipantData(user.id)
+    })()
+    return () => { cancelled = true }
+  }, [remainingSeconds, session, user, loadParticipantData])
+
   useEffect(() => {
     if (session?.challenge_id && challengeBrief === null) {
       supabase.from('challenges').select('challenge_number').eq('id', session.challenge_id).single().then(({ data }) => {

@@ -34,6 +34,10 @@ export function AdminDashboardPage() {
 
   const loadData = async () => {
     try {
+      // Finalize any sessions whose authoritative deadline has passed.
+      // This keeps the dashboard correct even if the participant closed the tab.
+      await supabase.rpc('finalize_expired_sessions')
+
       const { data: parts } = await supabase.from('participants').select('*').order('created_at', { ascending: false })
       const { data: sessions } = await supabase.from('sessions').select('*').not('session_status', 'eq', 'cancelled')
       const { data: challenges } = await supabase.from('challenges').select('*')
