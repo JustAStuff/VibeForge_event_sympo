@@ -10,11 +10,8 @@ import { Page, BrandMark } from '@/components/shared/Page'
 import { ChallengeIcon } from '@/components/shared/ChallengeIcon'
 import {
   Users,
-  AlertTriangle,
   Plus,
   Send,
-  CheckCircle2,
-  XCircle,
   LogOut,
   Search,
   Activity,
@@ -24,16 +21,15 @@ import {
   Pause,
   Play,
 } from 'lucide-react'
-import { formatMMSS } from '@/lib/utils'
+import { formatMMSS, formatIST } from '@/lib/utils'
 import { CHALLENGES } from '@/data/challenges'
 
-type Tab = 'participants' | 'recovery' | 'surprise'
+type Tab = 'participants' | 'surprise'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
   const { signOut } = useAuthStore()
   const [participants, setParticipants] = useState<any[]>([])
-  const [recoveryRequests, setRecoveryRequests] = useState<any[]>([])
   const [surpriseTasks, setSurpriseTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -47,7 +43,6 @@ export function AdminDashboardPage() {
   const [taskInstructions, setTaskInstructions] = useState('')
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [publishConfirm, setPublishConfirm] = useState<any>(null)
-  const [recoveryAction, setRecoveryAction] = useState<{ req: any; action: 'approve' | 'reject' } | null>(null)
 
   useEffect(() => {
     loadData()
@@ -61,6 +56,10 @@ export function AdminDashboardPage() {
       // Finalize any sessions whose authoritative deadline has passed.
       await supabase.rpc('finalize_expired_sessions')
 
+      // Use the database clock, not this browser's clock, for countdowns.
+      const { data: serverTs } = await supabase.rpc('server_now')
+      const nowMs = serverTs ? new Date(serverTs as string).getTime() : Date.now()
+
       const { data: parts } = await supabase.from('participants').select('*').order('created_at', { ascending: false })
       const { data: sessions } = await supabase.from('sessions').select('*').not('session_status', 'eq', 'cancelled')
       const { data: challenges } = await supabase.from('challenges').select('*')
@@ -72,18 +71,11 @@ export function AdminDashboardPage() {
           : null
         let remaining: number | null = null
         if (session && session.deadline_at && session.session_status === 'active') {
-          remaining = Math.max(0, Math.floor((new Date(session.deadline_at).getTime() - Date.now()) / 1000))
+          remaining = Math.max(0, Math.floor((new Date(session.deadline_at).getTime() - nowMs) / 1000))
         }
         return { participant: p, session, challenge, remaining }
       })
       setParticipants(combined)
-
-      const { data: rec } = await supabase
-        .from('recovery_requests')
-        .select('*, participants(full_name, register_number)')
-        .eq('status', 'pending')
-        .order('requested_at', { ascending: true })
-      setRecoveryRequests(rec || [])
 
       const { data: tasks } = await supabase
         .from('surprise_tasks')
@@ -193,46 +185,6 @@ export function AdminDashboardPage() {
     loadData()
   }
 
-  const reviewRecovery = async (req: any, action: 'approve' | 'reject') => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (action === 'approve') {
-        // Supersede any existing identity, then link this auth user.
-        await supabase.from('participant_identities').update({ is_active: false }).eq('participant_id', req.participant_id)
-        const { data: ident } = await supabase
-          .from('participant_identities')
-          .upsert(
-            {
-              participant_id: req.participant_id,
-              auth_user_id: req.requesting_auth_user_id,
-              linked_by_admin_id: user?.id,
-              is_active: true,
-            },
-            { onConflict: 'participant_id,auth_user_id' },
-          )
-          .select()
-          .single()
-
-        await supabase.from('recovery_requests').update({
-          status: 'approved',
-          reviewed_at: new Date().toISOString(),
-          reviewed_by_admin_id: user?.id,
-          approved_identity_id: ident?.id,
-        }).eq('id', req.id)
-      } else {
-        await supabase.from('recovery_requests').update({
-          status: 'rejected',
-          reviewed_at: new Date().toISOString(),
-          reviewed_by_admin_id: user?.id,
-        }).eq('id', req.id)
-      }
-      setRecoveryAction(null)
-      loadData()
-    } catch (err) {
-      console.error(err)
-    }
-  }
-
   const handleLogout = async () => {
     await signOut()
     navigate('/admin/login')
@@ -240,8 +192,9 @@ export function AdminDashboardPage() {
 
   const stats = useMemo(() => {
     const active = participants.filter((p) => p.session?.session_status === 'active').length
+    const paused = participants.filter((p) => p.session?.session_status === 'paused').length
     const completed = participants.filter((p) => p.session?.session_status === 'completed').length
-    return { total: participants.length, active, completed }
+    return { total: participants.length, active, paused, completed }
   }, [participants])
 
   const filtered = useMemo(() => {
@@ -255,7 +208,6 @@ export function AdminDashboardPage() {
 
   const tabs: { id: Tab; label: string; count: number; icon: typeof Users }[] = [
     { id: 'participants', label: 'Participants', count: participants.length, icon: Users },
-    { id: 'recovery', label: 'Recovery', count: recoveryRequests.length, icon: AlertTriangle },
     { id: 'surprise', label: 'Surprise tasks', count: surpriseTasks.length, icon: Sparkles },
   ]
 
@@ -290,7 +242,8 @@ export function AdminDashboardPage() {
         <div className="mb-7">
           <h1 className="text-2xl font-black tracking-tight text-vf-text sm:text-3xl">Live dashboard</h1>
           <p className="mt-1 text-sm text-vf-text-muted">
-            Auto-refreshes every 10 seconds. Times shown are authoritative server deadlines.
+            Auto-refreshes every 10 seconds. All times are IST (Asia/Kolkata); deadlines are
+            calculated by the server, not the participant's browser.
           </p>
         </div>
 
@@ -298,8 +251,8 @@ export function AdminDashboardPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard icon={<Users className="h-4 w-4" />} label="Registered" value={stats.total} accent="violet" />
           <StatCard icon={<Activity className="h-4 w-4" />} label="Running now" value={stats.active} accent="green" />
+          <StatCard icon={<Pause className="h-4 w-4" />} label="Paused" value={stats.paused} accent="orange" />
           <StatCard icon={<Trophy className="h-4 w-4" />} label="Completed" value={stats.completed} accent="cyan" />
-          <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Recovery pending" value={recoveryRequests.length} accent="orange" />
         </div>
 
         {/* Tabs + search */}
@@ -341,23 +294,25 @@ export function AdminDashboardPage() {
           {activeTab === 'participants' && (
             <div className="overflow-hidden rounded-2xl border border-vf-border bg-vf-surface/50">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px]">
+                <table className="w-full min-w-[1080px]">
                   <thead>
                     <tr className="border-b border-vf-border bg-vf-surface-2/60 text-left text-[11px] font-bold uppercase tracking-wider text-vf-text-muted">
                       <th className="px-5 py-3.5">Participant</th>
                       <th className="px-5 py-3.5">Year</th>
                       <th className="px-5 py-3.5">Challenge</th>
                       <th className="px-5 py-3.5">Status</th>
+                      <th className="px-5 py-3.5">Start (IST)</th>
+                      <th className="px-5 py-3.5">End (IST)</th>
                       <th className="px-5 py-3.5">Remaining</th>
                       <th className="px-5 py-3.5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={6} className="px-5 py-14 text-center text-sm text-vf-text-muted">Loading participants…</td></tr>
+                      <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-vf-text-muted">Loading participants…</td></tr>
                     ) : filtered.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-5 py-16 text-center">
+                        <td colSpan={8} className="px-5 py-16 text-center">
                           <div className="mx-auto flex max-w-xs flex-col items-center">
                             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-vf-border bg-vf-surface-2">
                               <Users className="h-5 w-5 text-vf-text-muted" />
@@ -397,6 +352,31 @@ export function AdminDashboardPage() {
                             </td>
                             <td className="px-5 py-3.5">
                               <StatusBadge status={p.session?.session_status || 'pending_challenge'} />
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {p.session?.started_at ? (
+                                <span className="font-mono text-sm text-vf-text-2">
+                                  {formatIST(p.session.started_at, 'hh:mm a')}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-vf-text-muted">—</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {p.session?.deadline_at ? (
+                                <div>
+                                  <div className="font-mono text-sm text-vf-text-2">
+                                    {formatIST(p.session.deadline_at, 'hh:mm a')}
+                                  </div>
+                                  {p.session.ended_at && (
+                                    <div className="text-[10px] uppercase tracking-wide text-vf-text-muted">
+                                      ended {formatIST(p.session.ended_at, 'hh:mm a')}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-sm text-vf-text-muted">—</span>
+                              )}
                             </td>
                             <td className="px-5 py-3.5">
                               {p.remaining !== null ? (
@@ -447,42 +427,6 @@ export function AdminDashboardPage() {
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
-
-          {activeTab === 'recovery' && (
-            <div className="rounded-2xl border border-vf-border bg-vf-surface/50">
-              {recoveryRequests.length === 0 ? (
-                <EmptyState
-                  icon={<CheckCircle2 className="h-5 w-5" />}
-                  title="No pending requests"
-                  body="Recovery requests appear here when a participant needs to re-link a new browser."
-                />
-              ) : (
-                <div className="divide-y divide-vf-border/60">
-                  {recoveryRequests.map((req) => (
-                    <div key={req.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-vf-text">{req.participants?.full_name}</p>
-                        <p className="font-mono text-xs text-vf-text-muted">{req.participants?.register_number}</p>
-                        <p className="mt-1.5 text-xs text-vf-text-muted">
-                          Requested {new Date(req.requested_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="success" onClick={() => setRecoveryAction({ req, action: 'approve' })}>
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => setRecoveryAction({ req, action: 'reject' })}>
-                          <XCircle className="h-3.5 w-3.5" />
-                          Reject
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
@@ -576,19 +520,7 @@ export function AdminDashboardPage() {
         variant="warning"
       />
 
-      <ConfirmDialog
-        isOpen={!!recoveryAction}
-        onClose={() => setRecoveryAction(null)}
-        onConfirm={() => recoveryAction && reviewRecovery(recoveryAction.req, recoveryAction.action)}
-        title={recoveryAction?.action === 'approve' ? 'Approve recovery?' : 'Reject recovery?'}
-        message={
-          recoveryAction?.action === 'approve'
-            ? `This links ${recoveryAction.req.participants?.full_name}'s active session to their current browser.`
-            : `This rejects ${recoveryAction?.req.participants?.full_name}'s recovery request.`
-        }
-        confirmLabel={recoveryAction?.action === 'approve' ? 'Approve' : 'Reject'}
-        variant={recoveryAction?.action === 'approve' ? 'default' : 'danger'}
-      />
+
     </Page>
   )
 }

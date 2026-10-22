@@ -26,12 +26,13 @@ export function formatMMSS(seconds: number): string {
 }
 
 /**
- * Calculate remaining seconds from a deadline (server-authoritative)
+ * Calculate remaining seconds from a deadline (server-authoritative).
+ * `serverOffsetMs` compensates for a participant's skewed local clock.
  */
-export function calcRemainingSeconds(deadlineAt: string | null): number {
+export function calcRemainingSeconds(deadlineAt: string | null, serverOffsetMs = 0): number {
   if (!deadlineAt) return 0
   const deadline = new Date(deadlineAt).getTime()
-  const now = Date.now()
+  const now = Date.now() + serverOffsetMs
   return Math.max(0, Math.floor((deadline - now) / 1000))
 }
 

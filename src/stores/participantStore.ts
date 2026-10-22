@@ -9,6 +9,21 @@ import type {
 } from '@/types'
 import { calcRemainingSeconds } from '@/lib/utils'
 
+/**
+ * Difference between the server clock and this browser's clock.
+ * Used for display only — the deadline itself is enforced by Postgres.
+ */
+let serverOffsetMs = 0
+
+function remainingFor(session: Session | null): number {
+  if (!session?.deadline_at) return 0
+  const base = calcRemainingSeconds(session.deadline_at, serverOffsetMs)
+  if (session.session_status === 'paused' && session.paused_at) {
+    return base + Math.floor(((Date.now() + serverOffsetMs) - new Date(session.paused_at).getTime()) / 1000)
+  }
+  return base
+}
+
 interface ParticipantState {
   participant: Participant | null
   session: Session | null
@@ -42,13 +57,7 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
 
   setParticipant: (participant) => set({ participant }),
   setSession: (session) => {
-    const remaining = session?.deadline_at
-      ? session.session_status === 'paused' && session.paused_at
-        ? calcRemainingSeconds(session.deadline_at) +
-          Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
-        : calcRemainingSeconds(session.deadline_at)
-      : 0
-    set({ session, remainingSeconds: remaining })
+    set({ session, remainingSeconds: remainingFor(session) })
   },
   setChallenge: (challenge) => set({ challenge }),
   setSurpriseTask: (surpriseTask) => set({ surpriseTask }),
@@ -57,6 +66,12 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
   loadParticipantData: async (authUserId: string) => {
     set({ loading: true, error: null })
     try {
+      // Align the countdown with the server clock (display only).
+      const { data: serverTs } = await supabase.rpc('server_now')
+      if (serverTs) {
+        serverOffsetMs = new Date(serverTs as string).getTime() - Date.now()
+      }
+
       // Find participant linked to this auth user
       const { data: identity, error: idErr } = await supabase
         .from('participant_identities')
@@ -96,12 +111,7 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
 
       set({
         session,
-        remainingSeconds: session.deadline_at
-          ? session.session_status === 'paused' && session.paused_at
-            ? calcRemainingSeconds(session.deadline_at) +
-              Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
-            : calcRemainingSeconds(session.deadline_at)
-          : 0,
+        remainingSeconds: remainingFor(session),
       })
 
       // Load challenge
@@ -147,8 +157,7 @@ export const useParticipantStore = create<ParticipantState>((set, get) => ({
   tickTimer: () => {
     const { session } = get()
     if (!session?.deadline_at || session.session_status === 'paused') return
-    const remaining = calcRemainingSeconds(session.deadline_at)
-    set({ remainingSeconds: remaining })
+    set({ remainingSeconds: remainingFor(session) })
   },
 
   reset: () => set({
