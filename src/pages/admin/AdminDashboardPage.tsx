@@ -1,15 +1,31 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
-import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input, Textarea } from '@/components/ui/Input'
 import { ConfirmDialog } from '@/components/ui/Dialog'
-import { Users, AlertTriangle, Plus, Send, CheckCircle, XCircle } from 'lucide-react'
-import { formatMMSS, getChallengeColor } from '@/lib/utils'
+import { Page, BrandMark } from '@/components/shared/Page'
+import { ChallengeIcon } from '@/components/shared/ChallengeIcon'
+import {
+  Users,
+  AlertTriangle,
+  Plus,
+  Send,
+  CheckCircle2,
+  XCircle,
+  LogOut,
+  Search,
+  Activity,
+  Trophy,
+  Sparkles,
+  RefreshCw,
+} from 'lucide-react'
+import { formatMMSS } from '@/lib/utils'
 import { CHALLENGES } from '@/data/challenges'
+
+type Tab = 'participants' | 'recovery' | 'surprise'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
@@ -17,14 +33,17 @@ export function AdminDashboardPage() {
   const [participants, setParticipants] = useState<any[]>([])
   const [recoveryRequests, setRecoveryRequests] = useState<any[]>([])
   const [surpriseTasks, setSurpriseTasks] = useState<any[]>([])
-  const [_loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'participants' | 'recovery' | 'surprise'>('participants')
-  
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [activeTab, setActiveTab] = useState<Tab>('participants')
+  const [query, setQuery] = useState('')
+
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskInstructions, setTaskInstructions] = useState('')
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [publishConfirm, setPublishConfirm] = useState<any>(null)
+  const [recoveryAction, setRecoveryAction] = useState<{ req: any; action: 'approve' | 'reject' } | null>(null)
 
   useEffect(() => {
     loadData()
@@ -33,25 +52,25 @@ export function AdminDashboardPage() {
   }, [])
 
   const loadData = async () => {
+    setRefreshing(true)
     try {
       // Finalize any sessions whose authoritative deadline has passed.
-      // This keeps the dashboard correct even if the participant closed the tab.
       await supabase.rpc('finalize_expired_sessions')
 
       const { data: parts } = await supabase.from('participants').select('*').order('created_at', { ascending: false })
       const { data: sessions } = await supabase.from('sessions').select('*').not('session_status', 'eq', 'cancelled')
       const { data: challenges } = await supabase.from('challenges').select('*')
-      
-      const combined = (parts || []).map(p => {
-        const sess = (sessions || []).find(s => s.participant_id === p.id)
-        const session = sess ?? null
-        const challenge = session && session.challenge_id ? ((challenges || []).find(c => c.id === session.challenge_id) || null) : null
-        const sessObj = session
-        let rem: number | null = null
-        if (sessObj && sessObj.deadline_at && sessObj.session_status === 'active') {
-          rem = Math.max(0, Math.floor((new Date(sessObj.deadline_at).getTime() - Date.now()) / 1000))
+
+      const combined = (parts || []).map((p) => {
+        const session = (sessions || []).find((s) => s.participant_id === p.id) ?? null
+        const challenge = session && session.challenge_id
+          ? (challenges || []).find((c) => c.id === session.challenge_id) || null
+          : null
+        let remaining: number | null = null
+        if (session && session.deadline_at && session.session_status === 'active') {
+          remaining = Math.max(0, Math.floor((new Date(session.deadline_at).getTime() - Date.now()) / 1000))
         }
-        return { participant: p, session: sessObj, challenge, remaining: rem }
+        return { participant: p, session, challenge, remaining }
       })
       setParticipants(combined)
 
@@ -71,6 +90,7 @@ export function AdminDashboardPage() {
       console.error(err)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
@@ -80,7 +100,7 @@ export function AdminDashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       const { data: sess } = await supabase.from('sessions').select('id').eq('participant_id', selectedParticipant.participant.id).single()
       if (!sess) return
-      
+
       await supabase.from('surprise_tasks').insert({
         session_id: sess.id,
         participant_id: selectedParticipant.participant.id,
@@ -89,7 +109,7 @@ export function AdminDashboardPage() {
         status: 'draft',
         created_by_admin_id: user?.id,
       })
-      
+
       setShowTaskForm(false)
       setTaskTitle('')
       setTaskInstructions('')
@@ -115,191 +135,400 @@ export function AdminDashboardPage() {
     }
   }
 
+  const reviewRecovery = async (req: any, action: 'approve' | 'reject') => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (action === 'approve') {
+        // Supersede any existing identity, then link this auth user.
+        await supabase.from('participant_identities').update({ is_active: false }).eq('participant_id', req.participant_id)
+        const { data: ident } = await supabase
+          .from('participant_identities')
+          .upsert(
+            {
+              participant_id: req.participant_id,
+              auth_user_id: req.requesting_auth_user_id,
+              linked_by_admin_id: user?.id,
+              is_active: true,
+            },
+            { onConflict: 'participant_id,auth_user_id' },
+          )
+          .select()
+          .single()
+
+        await supabase.from('recovery_requests').update({
+          status: 'approved',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_admin_id: user?.id,
+          approved_identity_id: ident?.id,
+        }).eq('id', req.id)
+      } else {
+        await supabase.from('recovery_requests').update({
+          status: 'rejected',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_admin_id: user?.id,
+        }).eq('id', req.id)
+      }
+      setRecoveryAction(null)
+      loadData()
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   const handleLogout = async () => {
     await signOut()
     navigate('/admin/login')
   }
 
+  const stats = useMemo(() => {
+    const active = participants.filter((p) => p.session?.session_status === 'active').length
+    const completed = participants.filter((p) => p.session?.session_status === 'completed').length
+    return { total: participants.length, active, completed }
+  }, [participants])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return participants
+    return participants.filter((p) =>
+      p.participant.full_name.toLowerCase().includes(q) ||
+      p.participant.register_number.toLowerCase().includes(q),
+    )
+  }, [participants, query])
+
+  const tabs: { id: Tab; label: string; count: number; icon: typeof Users }[] = [
+    { id: 'participants', label: 'Participants', count: participants.length, icon: Users },
+    { id: 'recovery', label: 'Recovery', count: recoveryRequests.length, icon: AlertTriangle },
+    { id: 'surprise', label: 'Surprise tasks', count: surpriseTasks.length, icon: Sparkles },
+  ]
+
   return (
-    <div className="min-h-screen bg-vf-bg">
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">VibeForge Admin Dashboard</h1>
-            <p className="text-vf-text-muted">Coordinator Control Panel</p>
+    <Page>
+      <header className="border-b border-vf-border/70 bg-vf-bg/60 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
+          <div className="flex items-center gap-4">
+            <BrandMark />
+            <span className="hidden h-5 w-px bg-vf-border sm:block" />
+            <span className="hidden text-xs font-bold uppercase tracking-[0.18em] text-vf-text-muted sm:block">
+              Coordinator
+            </span>
           </div>
-          <Button variant="secondary" onClick={handleLogout}>Logout</Button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadData}
+              className="inline-flex items-center gap-2 rounded-lg border border-vf-border bg-vf-surface/60 px-3 py-2 text-xs font-medium text-vf-text-2 transition-colors hover:border-vf-border-2 hover:text-vf-text"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+            <Button variant="secondary" size="sm" onClick={handleLogout}>
+              <LogOut className="h-3.5 w-3.5" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-5 pb-20 pt-8">
+        <div className="mb-7">
+          <h1 className="text-2xl font-black tracking-tight text-vf-text sm:text-3xl">Live dashboard</h1>
+          <p className="mt-1 text-sm text-vf-text-muted">
+            Auto-refreshes every 10 seconds. Times shown are authoritative server deadlines.
+          </p>
         </div>
 
-        <div className="flex gap-2 mb-6">
-          <button onClick={() => setActiveTab('participants')} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'participants' ? 'bg-vf-violet text-white' : 'bg-vf-surface-2 text-vf-text-2 hover:bg-vf-surface-3'}`}>
-            <Users className="w-4 h-4 inline mr-2" />
-            Participants ({participants.length})
-          </button>
-          <button onClick={() => setActiveTab('recovery')} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'recovery' ? 'bg-vf-violet text-white' : 'bg-vf-surface-2 text-vf-text-2 hover:bg-vf-surface-3'}`}>
-            <AlertTriangle className="w-4 h-4 inline mr-2" />
-            Recovery Requests ({recoveryRequests.length})
-          </button>
-          <button onClick={() => setActiveTab('surprise')} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'surprise' ? 'bg-vf-violet text-white' : 'bg-vf-surface-2 text-vf-text-2 hover:bg-vf-surface-3'}`}>
-            <AlertTriangle className="w-4 h-4 inline mr-2" />
-            Surprise Tasks
-          </button>
+        {/* Stats */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard icon={<Users className="h-4 w-4" />} label="Registered" value={stats.total} accent="violet" />
+          <StatCard icon={<Activity className="h-4 w-4" />} label="Running now" value={stats.active} accent="green" />
+          <StatCard icon={<Trophy className="h-4 w-4" />} label="Completed" value={stats.completed} accent="cyan" />
+          <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Recovery pending" value={recoveryRequests.length} accent="orange" />
         </div>
 
-        {activeTab === 'participants' && (
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-semibold">All Participants</h2>
-            </CardHeader>
-            <CardBody className="p-0">
+        {/* Tabs + search */}
+        <div className="mt-8 flex flex-col gap-3 border-b border-vf-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="-mx-1 flex gap-1 overflow-x-auto px-1">
+            {tabs.map(({ id, label, count, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                  activeTab === id
+                    ? 'bg-vf-violet text-white shadow-vf'
+                    : 'text-vf-text-2 hover:bg-vf-surface-2 hover:text-vf-text'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${activeTab === id ? 'bg-white/20' : 'bg-vf-surface-3'}`}>
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'participants' && (
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-vf-text-muted" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name or register no."
+                className="h-10 w-full rounded-lg border border-vf-border bg-vf-surface/60 pl-9 pr-3 text-sm text-vf-text placeholder:text-vf-text-muted/70 focus:border-vf-violet focus:outline-none focus:ring-1 focus:ring-vf-violet"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5">
+          {activeTab === 'participants' && (
+            <div className="overflow-hidden rounded-2xl border border-vf-border bg-vf-surface/50">
               <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-vf-surface-2">
-                    <tr>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Participant</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Register No.</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Year</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Challenge</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Status</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Time</th>
-                      <th className="text-left p-4 text-sm font-medium text-vf-text-2">Actions</th>
+                <table className="w-full min-w-[820px]">
+                  <thead>
+                    <tr className="border-b border-vf-border bg-vf-surface-2/60 text-left text-[11px] font-bold uppercase tracking-wider text-vf-text-muted">
+                      <th className="px-5 py-3.5">Participant</th>
+                      <th className="px-5 py-3.5">Year</th>
+                      <th className="px-5 py-3.5">Challenge</th>
+                      <th className="px-5 py-3.5">Status</th>
+                      <th className="px-5 py-3.5">Remaining</th>
+                      <th className="px-5 py-3.5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {participants.map((p) => {
-                      const brief = p.challenge ? CHALLENGES.find(c => c.number === p.challenge.challenge_number) : null
-                      return (
-                        <tr key={p.participant.id} className="border-t border-vf-border hover:bg-vf-surface-2/50">
-                          <td className="p-4">{p.participant.full_name}</td>
-                          <td className="p-4 font-mono text-sm">{p.participant.register_number}</td>
-                          <td className="p-4 text-sm">{p.participant.academic_year}</td>
-                          <td className="p-4">
-                            {p.challenge ? (
-                              <div className="flex items-center gap-2">
-                                <div className={`w-6 h-6 rounded bg-gradient-to-br ${getChallengeColor(p.challenge.challenge_number)} flex items-center justify-center text-white text-xs font-bold`}>
-                                  {p.challenge.challenge_number}
+                    {loading ? (
+                      <tr><td colSpan={6} className="px-5 py-14 text-center text-sm text-vf-text-muted">Loading participants…</td></tr>
+                    ) : filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-16 text-center">
+                          <div className="mx-auto flex max-w-xs flex-col items-center">
+                            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-vf-border bg-vf-surface-2">
+                              <Users className="h-5 w-5 text-vf-text-muted" />
+                            </div>
+                            <p className="text-sm font-medium text-vf-text-2">
+                              {query ? 'No matching participants' : 'No participants yet'}
+                            </p>
+                            <p className="mt-1 text-xs text-vf-text-muted">
+                              {query ? 'Try a different search term.' : 'They will appear here as soon as they register.'}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filtered.map((p) => {
+                        const brief = p.challenge ? CHALLENGES.find((c) => c.number === p.challenge.challenge_number) : null
+                        return (
+                          <tr key={p.participant.id} className="border-b border-vf-border/60 transition-colors last:border-0 hover:bg-vf-surface-2/40">
+                            <td className="px-5 py-3.5">
+                              <div className="text-sm font-semibold text-vf-text">{p.participant.full_name}</div>
+                              <div className="font-mono text-xs text-vf-text-muted">{p.participant.register_number}</div>
+                            </td>
+                            <td className="px-5 py-3.5 text-sm text-vf-text-2">{p.participant.academic_year}</td>
+                            <td className="px-5 py-3.5">
+                              {p.challenge ? (
+                                <div className="flex items-center gap-2.5">
+                                  <ChallengeIcon number={p.challenge.challenge_number} size="sm" />
+                                  <span className="text-sm text-vf-text-2">{brief?.title || p.challenge.title}</span>
                                 </div>
-                                <span className="text-sm">{brief?.title || p.challenge.title}</span>
-                              </div>
-                            ) : (
-                              <span className="text-vf-text-muted text-sm">Not selected</span>
-                            )}
-                          </td>
-                          <td className="p-4"><StatusBadge status={p.session?.session_status || 'pending_challenge'} /></td>
-                          <td className="p-4 font-mono">
-                            {p.remaining !== null ? (
-                              <span className={p.remaining <= 300 ? 'text-vf-orange' : ''}>{formatMMSS(p.remaining)}</span>
-                            ) : (
-                              <span className="text-vf-text-muted">-</span>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <Button size="sm" variant="secondary" onClick={() => { setSelectedParticipant(p); setShowTaskForm(true) }} disabled={!p.session}>
-                              <Plus className="w-3 h-3" />
-                              Add Surprise Task
-                            </Button>
-                          </td>
-                        </tr>
-                      )
-                    })}
+                              ) : (
+                                <span className="text-sm text-vf-text-muted">Not selected</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <StatusBadge status={p.session?.session_status || 'pending_challenge'} />
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {p.remaining !== null ? (
+                                <span className={`font-mono text-sm ${p.remaining <= 300 ? 'text-vf-orange' : 'text-vf-text-2'}`}>
+                                  {formatMMSS(p.remaining)}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-vf-text-muted">—</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => { setSelectedParticipant(p); setShowTaskForm(true) }}
+                                disabled={!p.session}
+                              >
+                                <Plus className="h-3 w-3" />
+                                Surprise
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
-            </CardBody>
-          </Card>
-        )}
+            </div>
+          )}
 
-        {activeTab === 'recovery' && (
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-semibold">Pending Recovery Requests</h2>
-            </CardHeader>
-            <CardBody>
+          {activeTab === 'recovery' && (
+            <div className="rounded-2xl border border-vf-border bg-vf-surface/50">
               {recoveryRequests.length === 0 ? (
-                <p className="text-vf-text-muted text-center py-8">No pending recovery requests</p>
+                <EmptyState
+                  icon={<CheckCircle2 className="h-5 w-5" />}
+                  title="No pending requests"
+                  body="Recovery requests appear here when a participant needs to re-link a new browser."
+                />
               ) : (
-                <div className="space-y-3">
+                <div className="divide-y divide-vf-border/60">
                   {recoveryRequests.map((req) => (
-                    <div key={req.id} className="flex items-center justify-between p-4 bg-vf-surface-2 rounded-lg border border-vf-border">
+                    <div key={req.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="font-medium">{req.participants?.full_name}</p>
-                        <p className="text-sm text-vf-text-muted font-mono">{req.participants?.register_number}</p>
-                        <p className="text-xs text-vf-text-muted mt-1">Requested: {new Date(req.requested_at).toLocaleString()}</p>
+                        <p className="text-sm font-semibold text-vf-text">{req.participants?.full_name}</p>
+                        <p className="font-mono text-xs text-vf-text-muted">{req.participants?.register_number}</p>
+                        <p className="mt-1.5 text-xs text-vf-text-muted">
+                          Requested {new Date(req.requested_at).toLocaleString()}
+                        </p>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="success"><CheckCircle className="w-3 h-3" />Allow Student</Button>
-                        <Button size="sm" variant="danger"><XCircle className="w-3 h-3" />Reject</Button>
+                        <Button size="sm" variant="success" onClick={() => setRecoveryAction({ req, action: 'approve' })}>
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Approve
+                        </Button>
+                        <Button size="sm" variant="danger" onClick={() => setRecoveryAction({ req, action: 'reject' })}>
+                          <XCircle className="h-3.5 w-3.5" />
+                          Reject
+                        </Button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </CardBody>
-          </Card>
-        )}
+            </div>
+          )}
 
-        {activeTab === 'surprise' && (
-          <Card>
-            <CardHeader>
-              <h2 className="text-lg font-semibold">Surprise Tasks</h2>
-            </CardHeader>
-            <CardBody>
+          {activeTab === 'surprise' && (
+            <div className="rounded-2xl border border-vf-border bg-vf-surface/50">
               {surpriseTasks.length === 0 ? (
-                <p className="text-vf-text-muted text-center py-8">No surprise tasks created yet</p>
+                <EmptyState
+                  icon={<Sparkles className="h-5 w-5" />}
+                  title="No surprise tasks yet"
+                  body="Create a confidential task from the Participants tab, then publish it when you are ready."
+                />
               ) : (
-                <div className="space-y-3">
+                <div className="divide-y divide-vf-border/60">
                   {surpriseTasks.map((task) => (
-                    <div key={task.id} className="p-4 bg-vf-surface-2 rounded-lg border border-vf-border">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <h3 className="font-semibold">{task.title}</h3>
-                          <p className="text-sm text-vf-text-muted">{task.participants?.full_name} • {task.participants?.register_number}</p>
+                    <div key={task.id} className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-bold text-vf-text">{task.title}</h3>
+                          <p className="mt-0.5 text-xs text-vf-text-muted">
+                            {task.participants?.full_name} · <span className="font-mono">{task.participants?.register_number}</span>
+                          </p>
                         </div>
                         <StatusBadge status={task.status} />
                       </div>
-                      <p className="text-sm text-vf-text-2 mb-3 whitespace-pre-wrap">{task.instructions}</p>
-                      <div className="flex gap-2">
-                        {task.status === 'draft' && (
-                          <Button size="sm" onClick={() => setPublishConfirm(task)}><Send className="w-3 h-3" />Display Surprise Task to Participant</Button>
-                        )}
-                      </div>
+                      <p className="mt-3 whitespace-pre-wrap rounded-lg border border-vf-border bg-vf-bg/50 p-3 text-sm leading-relaxed text-vf-text-2">
+                        {task.instructions}
+                      </p>
+                      {task.status === 'draft' && (
+                        <div className="mt-3">
+                          <Button size="sm" onClick={() => setPublishConfirm(task)}>
+                            <Send className="h-3.5 w-3.5" />
+                            Publish to participant
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
-            </CardBody>
-          </Card>
-        )}
+            </div>
+          )}
+        </div>
+      </main>
 
-        {showTaskForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-            <Card className="w-full max-w-lg">
-              <CardHeader>
-                <h2 className="text-lg font-semibold">Create Surprise Task</h2>
-                <p className="text-sm text-vf-text-muted">For: {selectedParticipant?.participant.full_name}</p>
-              </CardHeader>
-              <CardBody className="space-y-4">
-                <Input label="Task Title" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g., Bonus Challenge" />
-                <Textarea label="Instructions" value={taskInstructions} onChange={(e) => setTaskInstructions(e.target.value)} placeholder="Enter task instructions..." rows={6} />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="secondary" onClick={() => setShowTaskForm(false)}>Cancel</Button>
-                  <Button onClick={createDraftTask}>Save as Draft</Button>
-                </div>
-              </CardBody>
-            </Card>
+      {showTaskForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-vf-border bg-vf-surface p-6 shadow-2xl">
+            <h2 className="text-lg font-bold text-vf-text">New surprise task</h2>
+            <p className="mt-1 text-sm text-vf-text-muted">
+              For {selectedParticipant?.participant.full_name} — saved as a draft until you publish it.
+            </p>
+            <div className="mt-5 space-y-4">
+              <Input label="Task title" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g. Bonus challenge" />
+              <Textarea label="Instructions" value={taskInstructions} onChange={(e) => setTaskInstructions(e.target.value)} placeholder="What must the participant do?" rows={6} />
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => { setShowTaskForm(false); setTaskTitle(''); setTaskInstructions('') }}>
+                  Cancel
+                </Button>
+                <Button onClick={createDraftTask} disabled={!taskTitle || !taskInstructions}>
+                  Save draft
+                </Button>
+              </div>
+            </div>
           </div>
-        )}
+        </div>
+      )}
 
-        <ConfirmDialog
-          isOpen={!!publishConfirm}
-          onClose={() => setPublishConfirm(null)}
-          onConfirm={() => publishTask(publishConfirm)}
-          title="Display Surprise Task to Participant"
-          message="Are you sure you want to publish this surprise task? Once published, the participant will see it immediately and cannot be hidden."
-          confirmLabel="Publish & Display"
-          variant="warning"
-        />
+      <ConfirmDialog
+        isOpen={!!publishConfirm}
+        onClose={() => setPublishConfirm(null)}
+        onConfirm={() => publishTask(publishConfirm)}
+        title="Publish this surprise task?"
+        message="It will appear instantly on the participant's screen and cannot be hidden once published."
+        confirmLabel="Publish now"
+        variant="warning"
+      />
+
+      <ConfirmDialog
+        isOpen={!!recoveryAction}
+        onClose={() => setRecoveryAction(null)}
+        onConfirm={() => recoveryAction && reviewRecovery(recoveryAction.req, recoveryAction.action)}
+        title={recoveryAction?.action === 'approve' ? 'Approve recovery?' : 'Reject recovery?'}
+        message={
+          recoveryAction?.action === 'approve'
+            ? `This links ${recoveryAction.req.participants?.full_name}'s active session to their current browser.`
+            : `This rejects ${recoveryAction?.req.participants?.full_name}'s recovery request.`
+        }
+        confirmLabel={recoveryAction?.action === 'approve' ? 'Approve' : 'Reject'}
+        variant={recoveryAction?.action === 'approve' ? 'default' : 'danger'}
+      />
+    </Page>
+  )
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: number
+  accent: 'violet' | 'green' | 'cyan' | 'orange'
+}) {
+  const accents = {
+    violet: 'border-vf-violet/25 bg-vf-violet/[0.07] text-vf-violet-light',
+    green: 'border-vf-success/25 bg-vf-success/[0.07] text-vf-success',
+    cyan: 'border-vf-cyan/25 bg-vf-cyan/[0.07] text-vf-cyan',
+    orange: 'border-vf-orange/25 bg-vf-orange/[0.07] text-vf-orange',
+  }
+  return (
+    <div className="rounded-2xl border border-vf-border bg-vf-surface/60 p-4 backdrop-blur">
+      <div className={`mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg border ${accents[accent]}`}>
+        {icon}
       </div>
+      <div className="text-2xl font-black tabular-nums tracking-tight text-vf-text">{value}</div>
+      <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-wider text-vf-text-muted">{label}</div>
+    </div>
+  )
+}
+
+function EmptyState({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-vf-border bg-vf-surface-2 text-vf-text-muted">
+        {icon}
+      </div>
+      <p className="text-sm font-medium text-vf-text-2">{title}</p>
+      <p className="mt-1 max-w-xs text-xs leading-relaxed text-vf-text-muted">{body}</p>
     </div>
   )
 }

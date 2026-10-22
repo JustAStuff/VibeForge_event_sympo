@@ -1,26 +1,42 @@
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
-import { Card, CardBody } from '@/components/ui/Card'
+import { Page, BrandMark } from '@/components/shared/Page'
 import { Clock, ArrowLeft } from 'lucide-react'
 
 export function RecoveryAwaitingPage() {
   const navigate = useNavigate()
   return (
-    <div className="min-h-screen bg-vf-bg flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <button onClick={() => navigate('/')} className="flex items-center gap-2 text-vf-text-muted hover:text-vf-text mb-6 transition-colors">
-          <ArrowLeft className="w-4 h-4" />Back to Home
+    <Page className="flex min-h-screen flex-col">
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-6">
+        <button onClick={() => navigate('/')} className="transition-opacity hover:opacity-80">
+          <BrandMark />
         </button>
-        <Card>
-          <CardBody className="text-center py-8">
-            <Clock className="w-16 h-16 text-vf-warning mx-auto mb-4 animate-pulse" />
-            <h1 className="text-2xl font-bold mb-2">Awaiting Approval</h1>
-            <p className="text-vf-text-2 mb-4">Your recovery request has been submitted. The coordinator will review and approve it shortly.</p>
-            <p className="text-sm text-vf-text-muted mb-6">You will be notified once approved. You can then access your existing session.</p>
-            <Button onClick={() => navigate('/')} variant="secondary">Return to Home</Button>
-          </CardBody>
-        </Card>
-      </div>
-    </div>
+        <button
+          onClick={() => navigate('/')}
+          className="inline-flex items-center gap-2 text-xs font-medium text-vf-text-muted transition-colors hover:text-vf-text"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Home
+        </button>
+      </header>
+
+      <main className="flex flex-1 items-center justify-center px-5 pb-16">
+        <div className="w-full max-w-md rounded-3xl border border-vf-border bg-vf-surface/80 p-8 text-center backdrop-blur-xl">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-vf-warning/30 bg-vf-warning/10">
+            <Clock className="h-6 w-6 animate-pulse text-vf-warning" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-vf-text">Awaiting approval</h1>
+          <p className="mt-2 text-sm leading-relaxed text-vf-text-2">
+            Your recovery request has been submitted. The coordinator will review it shortly.
+          </p>
+          <p className="mt-3 text-xs leading-relaxed text-vf-text-muted">
+            Once approved, return here with the same register number to access your existing session.
+          </p>
+          <Button onClick={() => navigate('/')} variant="secondary" className="mt-6">
+            Return to home
+          </Button>
+        </div>
+      </main>
+    </Page>
   )
 }
