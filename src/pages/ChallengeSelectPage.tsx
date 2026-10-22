@@ -17,6 +17,7 @@ export function ChallengeSelectPage() {
   const [selected, setSelected] = useState<number | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [participantId, setParticipantId] = useState<string | null>(null)
+  const TEST_MODE = true // 5 min test
 
   useEffect(() => {
     async function getParticipant() {
@@ -29,7 +30,6 @@ export function ChallengeSelectPage() {
         .maybeSingle()
       if (identity) {
         setParticipantId(identity.participant_id)
-        // Check if already has active session
         const { data: sess } = await supabase
           .from('sessions')
           .select('session_status')
@@ -50,57 +50,40 @@ export function ChallengeSelectPage() {
     setLoading(true)
 
     try {
-      const { data: challenge, error: cErr } = await supabase
-        .from('challenges')
-        .select('id')
-        .eq('challenge_number', selected)
-        .maybeSingle()
-
-      if (cErr) throw cErr
+      const { data: challenge } = await supabase.from('challenges').select('id').eq('challenge_number', selected).maybeSingle()
       if (!challenge) throw new Error('Challenge not found')
 
-      // Try update first
+      const duration = TEST_MODE ? 5 : 45
+      const now = new Date()
       const { data: updated, error: sErr } = await supabase
         .from('sessions')
         .update({
           challenge_id: challenge.id,
           session_status: 'active',
-          started_at: new Date().toISOString(),
-          deadline_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-          resumed_at: new Date().toISOString(),
+          started_at: now.toISOString(),
+          deadline_at: new Date(now.getTime() + duration * 60 * 1000).toISOString(),
+          resumed_at: now.toISOString(),
         })
         .eq('participant_id', participantId)
-        .eq('session_status', 'pending_challenge')
         .select()
         .maybeSingle()
 
       if (sErr) throw sErr
-      if (!updated) {
-        // Try challenge_selected
-        const { data: updated2, error: sErr2 } = await supabase
-          .from('sessions')
-          .update({
-            challenge_id: challenge.id,
-            session_status: 'active',
-            started_at: new Date().toISOString(),
-            deadline_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-          })
-          .eq('participant_id', participantId)
-          .select()
-          .maybeSingle()
-        if (sErr2) throw sErr2
-        if (!updated2) throw new Error('Could not start session. Please refresh and try again.')
-        
-        // Create milestones
-        for (const m of [{t:'elapsed_15min',o:15},{t:'elapsed_30min',o:30},{t:'elapsed_45min',o:45}]) {
-          await supabase.from('milestone_events').insert({ session_id: updated2.id, participant_id: participantId, milestone_type: m.t, due_at: new Date(Date.now() + m.o * 60 * 1000).toISOString() })
-        }
-        navigate('/session')
-        return
-      }
+      if (!updated) throw new Error('Could not start session')
 
-      for (const m of [{t:'elapsed_15min',o:15},{t:'elapsed_30min',o:30},{t:'elapsed_45min',o:45}]) {
-        await supabase.from('milestone_events').insert({ session_id: updated.id, participant_id: participantId, milestone_type: m.t, due_at: new Date(Date.now() + m.o * 60 * 1000).toISOString() })
+      // Create milestones for test
+      if (TEST_MODE) {
+        await supabase.from('milestone_events').insert([
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_15min', due_at: new Date(now.getTime() + 2 * 60 * 1000).toISOString() },
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_30min', due_at: new Date(now.getTime() + 3 * 60 * 1000).toISOString() },
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_45min', due_at: new Date(now.getTime() + 5 * 60 * 1000).toISOString() },
+        ])
+      } else {
+        await supabase.from('milestone_events').insert([
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_15min', due_at: new Date(now.getTime() + 15 * 60 * 1000).toISOString() },
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_30min', due_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString() },
+          { session_id: updated.id, participant_id: participantId, milestone_type: 'elapsed_45min', due_at: new Date(now.getTime() + 45 * 60 * 1000).toISOString() },
+        ])
       }
       navigate('/session')
     } catch (err) {
@@ -117,8 +100,8 @@ export function ChallengeSelectPage() {
     <div className="min-h-screen bg-vf-bg">
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Choose Your Challenge</h1>
-          <p className="text-vf-text-muted">Select one of the six challenges. Full details will appear after you start the session.</p>
+          <h1 className="text-3xl font-bold mb-2">Choose Your Challenge {TEST_MODE && <span className="text-vf-orange">(TEST MODE - 5 MIN)</span>}</h1>
+          <p className="text-vf-text-muted">Select one of the six challenges.</p>
         </div>
 
         {error && <Alert type="error" className="mb-6">{error}</Alert>}
@@ -142,7 +125,7 @@ export function ChallengeSelectPage() {
 
         <div className="mt-6">
           <Button size="lg" disabled={!selected || loading} onClick={() => setConfirmOpen(true)}>
-            {loading ? 'Starting...' : `Continue with Challenge ${selected}`}
+            {loading ? 'Starting...' : `Start ${TEST_MODE ? '5 Min Test' : 'Session'} with Challenge ${selected}`}
           </Button>
         </div>
 
@@ -150,15 +133,15 @@ export function ChallengeSelectPage() {
           isOpen={confirmOpen}
           onClose={() => setConfirmOpen(false)}
           onConfirm={handleConfirm}
-          title="Start Your Session"
+          title="Start Test Session"
           message={
             <div>
-              <p className="mb-2">You are about to start your 45-minute session with:</p>
+              <p className="mb-2">You are about to start a <span className="text-vf-orange font-bold">5-MINUTE TEST</span> session with:</p>
               <p className={`font-semibold ${getChallengeAccent(selected || 1)}`}>Challenge {challenge?.number}: {challenge?.title}</p>
-              <p className="mt-3 text-vf-warning">Once started, the timer cannot be paused by you and cannot be restarted if the session ends.</p>
+              <p className="mt-3 text-vf-cyan">Notifications will trigger at 2 min, 3 min, and 5 min.</p>
             </div>
           }
-          confirmLabel="Start Session (45 min)"
+          confirmLabel="Start Test (5 min)"
           loading={loading}
         />
       </div>

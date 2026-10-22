@@ -11,6 +11,7 @@ import { CHALLENGES } from '@/data/challenges'
 import { notifySurpriseTask } from '@/lib/notifications'
 import { Clock, Bell, CheckCircle, AlertTriangle } from 'lucide-react'
 import { LoadingPage } from '@/components/ui/Loading'
+import { MilestoneWatcher } from '@/components/shared/MilestoneWatcher'
 
 export function SessionPage() {
   const navigate = useNavigate()
@@ -86,6 +87,8 @@ export function SessionPage() {
           </div>
           <StatusBadge status={session.session_status} />
         </div>
+
+        <MilestoneWatcher sessionId={session.id} participantName={participant.full_name} />
 
         <Card className="mb-6">
           <CardBody className="text-center py-8">
