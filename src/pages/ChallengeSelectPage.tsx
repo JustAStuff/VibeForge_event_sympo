@@ -7,7 +7,7 @@ import { Card, CardBody } from '@/components/ui/Card'
 import { Alert, ConfirmDialog } from '@/components/ui/Dialog'
 import { CHALLENGES } from '@/data/challenges'
 import { getChallengeColor, getChallengeAccent } from '@/lib/utils'
-import { ArrowLeft, CheckCircle } from 'lucide-react'
+import { CheckCircle } from 'lucide-react'
 
 export function ChallengeSelectPage() {
   const navigate = useNavigate()
@@ -20,40 +20,92 @@ export function ChallengeSelectPage() {
 
   useEffect(() => {
     async function getParticipant() {
-      if (!user) return
-      const { data: identity } = await supabase.from('participant_identities').select('participant_id').eq('auth_user_id', user.id).eq('is_active', true).maybeSingle()
-      if (identity) setParticipantId(identity.participant_id)
+      if (!user) { navigate('/'); return }
+      const { data: identity } = await supabase
+        .from('participant_identities')
+        .select('participant_id')
+        .eq('auth_user_id', user.id)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (identity) {
+        setParticipantId(identity.participant_id)
+        // Check if already has active session
+        const { data: sess } = await supabase
+          .from('sessions')
+          .select('session_status')
+          .eq('participant_id', identity.participant_id)
+          .in('session_status', ['active', 'paused'])
+          .maybeSingle()
+        if (sess) navigate('/session')
+      } else {
+        navigate('/register')
+      }
     }
     getParticipant()
-  }, [user])
+  }, [user, navigate])
 
   const handleConfirm = async () => {
-    if (!selected || !participantId) return
+    if (!selected || !participantId) { setError('Missing participant info'); return }
     setError('')
     setLoading(true)
+
     try {
-      const { data: challenge, error: cErr } = await supabase.from('challenges').select('id').eq('challenge_number', selected).single()
-      if (cErr || !challenge) throw new Error('Challenge not found in database. Please contact the administrator.')
-      const { data: session, error: sErr } = await supabase.from('sessions').update({
-        challenge_id: challenge.id,
-        session_status: 'active',
-        started_at: new Date().toISOString(),
-        deadline_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-        resumed_at: new Date().toISOString(),
-      }).eq('participant_id', participantId).in('session_status', ['pending_challenge', 'challenge_selected']).select().single()
+      const { data: challenge, error: cErr } = await supabase
+        .from('challenges')
+        .select('id')
+        .eq('challenge_number', selected)
+        .maybeSingle()
+
+      if (cErr) throw cErr
+      if (!challenge) throw new Error('Challenge not found')
+
+      // Try update first
+      const { data: updated, error: sErr } = await supabase
+        .from('sessions')
+        .update({
+          challenge_id: challenge.id,
+          session_status: 'active',
+          started_at: new Date().toISOString(),
+          deadline_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+          resumed_at: new Date().toISOString(),
+        })
+        .eq('participant_id', participantId)
+        .eq('session_status', 'pending_challenge')
+        .select()
+        .maybeSingle()
+
       if (sErr) throw sErr
-      const milestones = [
-        { milestone_type: 'elapsed_15min', offset_min: 15 },
-        { milestone_type: 'elapsed_30min', offset_min: 30 },
-        { milestone_type: 'elapsed_45min', offset_min: 45 },
-      ]
-      for (const m of milestones) {
-        await supabase.from('milestone_events').insert({ session_id: session.id, participant_id: participantId, milestone_type: m.milestone_type, due_at: new Date(Date.now() + m.offset_min * 60 * 1000).toISOString() })
+      if (!updated) {
+        // Try challenge_selected
+        const { data: updated2, error: sErr2 } = await supabase
+          .from('sessions')
+          .update({
+            challenge_id: challenge.id,
+            session_status: 'active',
+            started_at: new Date().toISOString(),
+            deadline_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+          })
+          .eq('participant_id', participantId)
+          .select()
+          .maybeSingle()
+        if (sErr2) throw sErr2
+        if (!updated2) throw new Error('Could not start session. Please refresh and try again.')
+        
+        // Create milestones
+        for (const m of [{t:'elapsed_15min',o:15},{t:'elapsed_30min',o:30},{t:'elapsed_45min',o:45}]) {
+          await supabase.from('milestone_events').insert({ session_id: updated2.id, participant_id: participantId, milestone_type: m.t, due_at: new Date(Date.now() + m.o * 60 * 1000).toISOString() })
+        }
+        navigate('/session')
+        return
+      }
+
+      for (const m of [{t:'elapsed_15min',o:15},{t:'elapsed_30min',o:30},{t:'elapsed_45min',o:45}]) {
+        await supabase.from('milestone_events').insert({ session_id: updated.id, participant_id: participantId, milestone_type: m.t, due_at: new Date(Date.now() + m.o * 60 * 1000).toISOString() })
       }
       navigate('/session')
     } catch (err) {
+      console.error(err)
       setError((err as Error).message)
-    } finally {
       setLoading(false)
       setConfirmOpen(false)
     }
@@ -68,7 +120,9 @@ export function ChallengeSelectPage() {
           <h1 className="text-3xl font-bold mb-2">Choose Your Challenge</h1>
           <p className="text-vf-text-muted">Select one of the six challenges. Full details will appear after you start the session.</p>
         </div>
+
         {error && <Alert type="error" className="mb-6">{error}</Alert>}
+
         <div className="grid md:grid-cols-2 gap-4">
           {CHALLENGES.map((c) => (
             <Card key={c.number} variant="hover" onClick={() => setSelected(c.number)} className={selected === c.number ? 'ring-2 ring-vf-violet' : ''}>
@@ -85,8 +139,28 @@ export function ChallengeSelectPage() {
             </Card>
           ))}
         </div>
-        <div className="mt-6"><Button size="lg" disabled={!selected} onClick={() => setConfirmOpen(true)}>Continue with Challenge {selected}</Button></div>
-        <ConfirmDialog isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={handleConfirm} title="Start Your Session" message={<div><p className="mb-2">You are about to start your 45-minute session with:</p><p className={`font-semibold ${getChallengeAccent(selected || 1)}`}>Challenge {challenge?.number}: {challenge?.title}</p><p className="mt-3 text-vf-warning">Once started, the timer cannot be paused by you and cannot be restarted if the session ends.</p></div>} confirmLabel="Start Session (45 min)" loading={loading} />
+
+        <div className="mt-6">
+          <Button size="lg" disabled={!selected || loading} onClick={() => setConfirmOpen(true)}>
+            {loading ? 'Starting...' : `Continue with Challenge ${selected}`}
+          </Button>
+        </div>
+
+        <ConfirmDialog
+          isOpen={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={handleConfirm}
+          title="Start Your Session"
+          message={
+            <div>
+              <p className="mb-2">You are about to start your 45-minute session with:</p>
+              <p className={`font-semibold ${getChallengeAccent(selected || 1)}`}>Challenge {challenge?.number}: {challenge?.title}</p>
+              <p className="mt-3 text-vf-warning">Once started, the timer cannot be paused by you and cannot be restarted if the session ends.</p>
+            </div>
+          }
+          confirmLabel="Start Session (45 min)"
+          loading={loading}
+        />
       </div>
     </div>
   )
