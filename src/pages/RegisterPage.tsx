@@ -44,40 +44,61 @@ export function RegisterPage() {
       
       const { data: existing } = await supabase
         .from('participants')
-        .select('id')
+        .select('*')
         .eq('normalized_register_number', normalized)
         .maybeSingle()
 
       if (existing) {
-        // Check if they have identity
-        const { data: identity } = await supabase
-          .from('participant_identities')
-          .select('id')
+        // Check if they have session
+        const { data: existingSession } = await supabase
+          .from('sessions')
+          .select('*')
           .eq('participant_id', existing.id)
-          .eq('auth_user_id', currentUser?.id)
           .maybeSingle()
         
-        if (identity) {
-          // Has session?
-          const { data: existingSession } = await supabase
-            .from('sessions')
-            .select('session_status')
-            .eq('participant_id', existing.id)
-            .in('session_status', ['active', 'paused', 'challenge_selected'])
-            .maybeSingle()
-          if (existingSession?.session_status === 'active' || existingSession?.session_status === 'paused') {
+        if (existingSession) {
+          if (existingSession.session_status === 'active' || existingSession.session_status === 'paused') {
+            // Check if not expired
+            if (existingSession.deadline_at) {
+              const deadline = new Date(existingSession.deadline_at).getTime()
+              if (Date.now() < deadline) {
+                // Link identity if not exists
+                if (currentUser) {
+                  await supabase.from('participant_identities').upsert({
+                    participant_id: existing.id,
+                    auth_user_id: currentUser.id,
+                    is_active: true,
+                  }, { onConflict: 'participant_id,auth_user_id' })
+                }
+                navigate('/session')
+                return
+              }
+            } else {
+              if (currentUser) {
+                await supabase.from('participant_identities').upsert({
+                  participant_id: existing.id,
+                  auth_user_id: currentUser.id,
+                  is_active: true,
+                }, { onConflict: 'participant_id,auth_user_id' })
+              }
+              navigate('/session')
+              return
+            }
+          }
+          if (existingSession.session_status === 'challenge_selected') {
+            if (currentUser) {
+              await supabase.from('participant_identities').upsert({
+                participant_id: existing.id,
+                auth_user_id: currentUser.id,
+                is_active: true,
+              }, { onConflict: 'participant_id,auth_user_id' })
+            }
             navigate('/session')
             return
           }
-          if (existingSession?.session_status === 'challenge_selected') {
-            navigate('/session')
-            return
-          }
-          navigate('/challenges')
-          return
         }
         
-        setError('This register number is already registered with a different session/browser. Please use the same browser or contact the coordinator for recovery.')
+        setError('This register number is already registered with an ended/completed session. Please contact the coordinator for recovery.')
         setLoading(false)
         return
       }
@@ -96,11 +117,11 @@ export function RegisterPage() {
       if (pErr) throw pErr
 
       if (currentUser) {
-        await supabase.from('participant_identities').insert({
+        await supabase.from('participant_identities').upsert({
           participant_id: participant.id,
           auth_user_id: currentUser.id,
           is_active: true,
-        })
+        }, { onConflict: 'participant_id,auth_user_id' })
       }
 
       await supabase
